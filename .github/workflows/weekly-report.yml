@@ -1,0 +1,231 @@
+name: ARM KVM Weekly Report
+
+on:
+  schedule:
+    # 每周一早上9点 (UTC) 运行
+    - cron: '0 9 * * 1'
+  
+  # 允许手动触发
+  workflow_dispatch:
+    inputs:
+      since:
+        description: '开始日期 (YYYY-MM-DD)'
+        required: false
+        type: string
+      until:
+        description: '结束日期 (YYYY-MM-DD)'
+        required: false
+        type: string
+      send_notifications:
+        description: '发送通知'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  analyze-and-notify:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Configure Git (required for repository cloning)
+      run: |
+        git config --global user.name "ARM KVM Analyzer"
+        git config --global user.email "analyzer@example.com"
+    
+    - name: Run ARM KVM analysis
+      env:
+        # AI Provider Configuration
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        AI_PROVIDER: openai
+        
+        # Notification Platform Configurations
+        ENABLE_LARK: ${{ vars.ENABLE_LARK }}
+        LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+        LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
+        
+        ENABLE_TELEGRAM: ${{ vars.ENABLE_TELEGRAM }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+        
+        ENABLE_EMAIL: ${{ vars.ENABLE_EMAIL }}
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS }}
+        SMTP_SERVER: ${{ vars.SMTP_SERVER || 'smtp.gmail.com' }}
+        SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
+        
+        # System Configuration
+        DEFAULT_LANGUAGE: zh
+        VERIFY_COMPLETENESS: true
+        DEBUG: false
+      
+      run: |
+        # 构建命令行参数
+        CMD_ARGS="python analyze.py main"
+        
+        # 如果手动触发且指定了日期范围
+        if [ "${{ github.event.inputs.since }}" != "" ] && [ "${{ github.event.inputs.until }}" != "" ]; then
+          CMD_ARGS="$CMD_ARGS --since ${{ github.event.inputs.since }} --until ${{ github.event.inputs.until }}"
+        fi
+        
+        # 如果启用了通知发送
+        if [ "${{ github.event.inputs.send_notifications }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+          CMD_ARGS="$CMD_ARGS --send-notifications"
+        fi
+        
+        # 执行分析
+        echo "🚀 执行命令: $CMD_ARGS"
+        $CMD_ARGS
+    
+    - name: Upload analysis results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: arm-kvm-analysis-results
+        path: results/
+        retention-days: 30
+    
+    - name: Test notification platforms (if analysis failed)
+      if: failure()
+      env:
+        ENABLE_LARK: ${{ vars.ENABLE_LARK }}
+        LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+        ENABLE_TELEGRAM: ${{ vars.ENABLE_TELEGRAM }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+        ENABLE_EMAIL: ${{ vars.ENABLE_EMAIL }}
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS }}
+      run: |
+        echo "❌ 分析失败，测试通知平台连通性..."
+        python analyze.py notify test-platforms
+    
+    - name: Send failure notification
+      if: failure()
+      env:
+        ENABLE_TELEGRAM: ${{ vars.ENABLE_TELEGRAM }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+      run: |
+        if [ "$ENABLE_TELEGRAM" = "true" ]; then
+          curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"chat_id\": \"${TELEGRAM_CHAT_ID}\",
+              \"text\": \"❌ ARM KVM邮件列表分析失败\\n\\n📅 时间: $(date)\\n🔗 查看详情: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\",
+              \"parse_mode\": \"Markdown\"
+            }"
+        fi
+
+  # 可选：部署到GitHub Pages
+  deploy-reports:
+    runs-on: ubuntu-latest
+    needs: analyze-and-notify
+    if: success() && github.event_name == 'schedule'
+    
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    
+    steps:
+    - name: Download analysis results
+      uses: actions/download-artifact@v4
+      with:
+        name: arm-kvm-analysis-results
+        path: results/
+    
+    - name: Setup Pages
+      uses: actions/configure-pages@v4
+    
+    - name: Create index page
+      run: |
+        mkdir -p public
+        cat > public/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>ARM KVM 邮件列表分析报告</title>
+            <meta charset="utf-8">
+            <style>
+                body { font-family: Arial, sans-serif; margin: 40px; }
+                .header { text-align: center; margin-bottom: 40px; }
+                .reports { display: grid; gap: 20px; }
+                .report-card { border: 1px solid #ddd; padding: 20px; border-radius: 8px; }
+                .report-card h3 { margin-top: 0; color: #007acc; }
+                .report-links a { margin-right: 15px; text-decoration: none; color: #007acc; }
+                .report-links a:hover { text-decoration: underline; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>📊 ARM KVM 邮件列表分析报告</h1>
+                <p>自动生成的周报和分析结果</p>
+            </div>
+            
+            <div class="reports">
+        EOF
+        
+        # 遍历结果目录，生成报告链接
+        for dir in results/*/; do
+          if [ -d "$dir" ]; then
+            date=$(basename "$dir")
+            echo "                <div class=\"report-card\">" >> public/index.html
+            echo "                    <h3>📅 $date</h3>" >> public/index.html
+            echo "                    <div class=\"report-links\">" >> public/index.html
+            
+            # 检查各种报告文件
+            if [ -f "$dir/interactive_report.html" ]; then
+              echo "                        <a href=\"results/$date/interactive_report.html\">📱 交互式报告</a>" >> public/index.html
+            fi
+            if [ -f "$dir/analysis_report_zh.md" ]; then
+              echo "                        <a href=\"results/$date/analysis_report_zh.md\">📄 中文报告</a>" >> public/index.html
+            fi
+            if [ -f "$dir/weekly_report.txt" ]; then
+              echo "                        <a href=\"results/$date/weekly_report.txt\">📋 周报</a>" >> public/index.html
+            fi
+            if [ -f "$dir/statistics.json" ]; then
+              echo "                        <a href=\"results/$date/statistics.json\">📊 统计数据</a>" >> public/index.html
+            fi
+            
+            echo "                    </div>" >> public/index.html
+            echo "                </div>" >> public/index.html
+          fi
+        done
+        
+        cat >> public/index.html << 'EOF'
+            </div>
+            
+            <div style="margin-top: 40px; text-align: center; color: #666;">
+                <p>🤖 由 ARM KVM Mail Analyzer 自动生成</p>
+                <p>📅 最后更新: $(date)</p>
+            </div>
+        </body>
+        </html>
+        EOF
+        
+        # 复制结果文件
+        cp -r results public/
+    
+    - name: Upload to Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: public/
+    
+    - name: Deploy to Pages
+      uses: actions/deploy-pages@v4

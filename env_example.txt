@@ -1,0 +1,62 @@
+# ARM KVM邮件列表分析系统 - 环境变量配置示例
+# 复制此文件为 .env 并填入你的配置
+
+# =============================================================================
+# AI 服务配置
+# =============================================================================
+
+# OpenAI API 配置 (默认使用)
+OPENAI_API_KEY=sk-proj-your-openai-api-key-here
+
+# Google Gemini API 配置 (可选)
+GEMINI_API_KEY=your-gemini-api-key-here
+
+# Anthropic Claude API 配置 (可选)
+ANTHROPIC_API_KEY=your-anthropic-api-key-here
+
+# =============================================================================
+# 通知平台配置
+# =============================================================================
+
+# Lark (飞书) 通知配置
+ENABLE_LARK=true
+LARK_WEBHOOK_URL=https://open.larksuite.com/open-apis/bot/v2/hook/your-webhook-token
+LARK_WEBHOOK_SECRET=your-webhook-secret-optional
+
+# Telegram 通知配置
+ENABLE_TELEGRAM=true
+TELEGRAM_BOT_TOKEN=123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ
+TELEGRAM_CHAT_ID=-1001234567890
+
+# Email 通知配置
+ENABLE_EMAIL=true
+EMAIL_USER=your-email@gmail.com
+EMAIL_PASSWORD=your-app-password
+EMAIL_RECIPIENTS=recipient1@example.com,recipient2@example.com,recipient3@example.com
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+
+# =============================================================================
+# 系统配置
+# =============================================================================
+
+# AI 提供商选择 (openai, gemini, claude)
+AI_PROVIDER=openai
+
+# 默认语言 (zh, en)
+DEFAULT_LANGUAGE=zh
+
+# 输出目录
+OUTPUT_DIR=results
+
+# 调试模式
+DEBUG=false
+
+# 邮件提取验证
+VERIFY_COMPLETENESS=true
+
+# 默认发送通知
+SEND_NOTIFICATIONS=false
+
+# 最大Token数限制
+MAX_TOKENS_PER_CHUNK=8000

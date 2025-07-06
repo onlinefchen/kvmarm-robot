@@ -1,0 +1,30 @@
+title: ARM KVM 邮件列表分析报告
+description: 自动生成的ARM KVM邮件列表技术分析报告
+baseurl: ""
+url: "https://onlinefchen.github.io"
+
+markdown: kramdown
+highlighter: rouge
+theme: minima
+
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+
+collections:
+  reports:
+    output: true
+    permalink: /:collection/:name/
+
+defaults:
+  - scope:
+      path: ""
+      type: "reports"
+    values:
+      layout: "report"
