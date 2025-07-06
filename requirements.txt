@@ -23,6 +23,7 @@ httpx>=0.26.0
 
 # Text processing
 tiktoken>=0.5.2
+markdown>=3.5.0
 
 # Utilities
 python-dotenv>=1.0.0
