@@ -41,11 +41,29 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
-        python analyze.py main --output docs/reports/$(date +%Y-%m-%d)
+        # 确保目录存在
+        mkdir -p docs/reports
+        python analyze.py main --output results
         
-    - name: Generate HTML reports
+    - name: Generate HTML reports and prepare for deployment
       run: |
-        python html_generator.py --deploy
+        # 确保docs目录存在
+        mkdir -p docs/reports
+        
+        # 查找最新的结果目录
+        LATEST_DIR=$(ls -td results/*/ | head -1)
+        if [ -d "$LATEST_DIR" ]; then
+          echo "📁 找到结果目录: $LATEST_DIR"
+          
+          # 复制到docs目录以便GitHub Pages部署
+          cp -r "$LATEST_DIR" docs/reports/
+          
+          # 生成HTML报告
+          python html_generator.py --results-dir "$LATEST_DIR" --deploy
+        else
+          echo "❌ 未找到结果目录"
+          exit 1
+        fi
         
     - name: Setup Pages
       uses: actions/configure-pages@v4

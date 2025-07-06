@@ -10,13 +10,13 @@ from models import EmailForest, EmailThread, EmailNode
 class ReportGenerator:
     def __init__(self, output_dir: str = "results", language: str = "zh"):
         self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         self.language = language
         
         # 创建时间戳目录
         self.timestamp = datetime.now().strftime("%Y-%m-%d")
         self.report_dir = self.output_dir / self.timestamp
-        self.report_dir.mkdir(exist_ok=True)
+        self.report_dir.mkdir(parents=True, exist_ok=True)
         
         # 初始化多语言文本
         self._init_i18n()
