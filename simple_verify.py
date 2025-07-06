@@ -62,11 +62,19 @@ def check_github_urls():
         if Path(file_path).exists():
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                if 'onlinefchen.github.io/kvmarm-robot' in content:
-                    print(f"✅ {file_path} - URL配置正确")
-                    correct_urls += 1
+                # 特殊处理Jekyll配置文件
+                if file_path == 'docs/_config.yml':
+                    if 'onlinefchen.github.io' in content and '/kvmarm-robot' in content:
+                        print(f"✅ {file_path} - Jekyll URL配置正确")
+                        correct_urls += 1
+                    else:
+                        print(f"❌ {file_path} - Jekyll URL配置错误")
                 else:
-                    print(f"❌ {file_path} - URL配置错误")
+                    if 'onlinefchen.github.io/kvmarm-robot' in content:
+                        print(f"✅ {file_path} - URL配置正确")
+                        correct_urls += 1
+                    else:
+                        print(f"❌ {file_path} - URL配置错误")
         else:
             print(f"❌ {file_path} - 文件不存在")
     
