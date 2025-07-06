@@ -1,6 +1,6 @@
 title: ARM KVM 邮件列表分析报告
 description: 自动生成的ARM KVM邮件列表技术分析报告
-baseurl: ""
+baseurl: "/kvmarm-robot"
 url: "https://onlinefchen.github.io"
 
 markdown: kramdown
