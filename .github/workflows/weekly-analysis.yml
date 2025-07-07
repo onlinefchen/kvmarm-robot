@@ -89,46 +89,46 @@ jobs:
     - name: 创建主页
       run: |
         cat > docs/index.html << 'EOF'
-        <!DOCTYPE html>
-        <html lang="zh-CN">
-        <head>
-            <meta charset="utf-8">
-            <title>ARM KVM 邮件分析报告</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                .header { background: #2c3e50; color: white; padding: 20px; border-radius: 10px; }
-                .content { margin: 20px 0; }
-                .report-card { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px; }
-                .link { display: inline-block; background: #3498db; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; margin: 5px; }
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <h1>ARM KVM 邮件列表分析</h1>
-                <p>自动化技术分析 • 每周更新</p>
-            </div>
-            <div class="content">
-                <h2>最新报告</h2>
-        EOF
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>ARM KVM 邮件分析报告</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { background: #2c3e50; color: white; padding: 20px; border-radius: 10px; }
+        .content { margin: 20px 0; }
+        .report-card { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px; }
+        .link { display: inline-block; background: #3498db; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>ARM KVM 邮件列表分析</h1>
+        <p>自动化技术分析 • 每周更新</p>
+    </div>
+    <div class="content">
+        <h2>最新报告</h2>
+EOF
         
         for report_dir in docs/reports/*/; do
           if [ -d "$report_dir" ]; then
             date=$(basename "$report_dir")
             cat >> docs/index.html << EOF
-                <div class="report-card">
-                    <h3>$date 报告</h3>
-                    <a href="reports/$date/" class="link">查看报告</a>
-                    <a href="reports/$date/analysis_report_zh.md" class="link">Markdown</a>
-                </div>
-        EOF
+        <div class="report-card">
+            <h3>$date 报告</h3>
+            <a href="reports/$date/" class="link">查看报告</a>
+            <a href="reports/$date/analysis_report_zh.md" class="link">Markdown</a>
+        </div>
+EOF
           fi
         done
         
         cat >> docs/index.html << 'EOF'
-            </div>
-        </body>
-        </html>
-        EOF
+    </div>
+</body>
+</html>
+EOF
     
     - name: 上传调试文件
       uses: actions/upload-artifact@v4
@@ -161,38 +161,38 @@ jobs:
           DATE_STR=$(basename "$LATEST_DIR" 2>/dev/null || date +%Y-%m-%d)
           
           cat > send_email.py << 'EOF'
-        import smtplib
-        import os
-        from email.mime.text import MIMEText
-        from datetime import datetime
-        
-        user = os.getenv('EMAIL_USER')
-        password = os.getenv('EMAIL_PASSWORD')
-        recipients = os.getenv('EMAIL_RECIPIENTS', '').split(',')
-        date_str = os.getenv('DATE_STR', '')
-        
-        content = f"""ARM KVM周报 - {date_str}
-        
-        数据分析已完成，详情请查看在线报告
-        
-        在线查看: https://onlinefchen.github.io/kvmarm-robot/reports/{date_str}/
-        历史报告: https://onlinefchen.github.io/kvmarm-robot
-        
-        生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (东八区)
-        """
-        
-        msg = MIMEText(content, 'plain', 'utf-8')
-        msg['Subject'] = f'ARM KVM周报 - {date_str}'
-        msg['From'] = user
-        msg['To'] = ', '.join([r.strip() for r in recipients if r.strip()])
-        
-        with smtplib.SMTP('smtp.gmail.com', 587) as server:
-            server.starttls()
-            server.login(user, password)
-            server.send_message(msg)
-        
-        print('邮件发送成功')
-        EOF
+import smtplib
+import os
+from email.mime.text import MIMEText
+from datetime import datetime
+
+user = os.getenv('EMAIL_USER')
+password = os.getenv('EMAIL_PASSWORD')
+recipients = os.getenv('EMAIL_RECIPIENTS', '').split(',')
+date_str = os.getenv('DATE_STR', '')
+
+content = f"""ARM KVM周报 - {date_str}
+
+数据分析已完成，详情请查看在线报告
+
+在线查看: https://onlinefchen.github.io/kvmarm-robot/reports/{date_str}/
+历史报告: https://onlinefchen.github.io/kvmarm-robot
+
+生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (东八区)
+"""
+
+msg = MIMEText(content, 'plain', 'utf-8')
+msg['Subject'] = f'ARM KVM周报 - {date_str}'
+msg['From'] = user
+msg['To'] = ', '.join([r.strip() for r in recipients if r.strip()])
+
+with smtplib.SMTP('smtp.gmail.com', 587) as server:
+    server.starttls()
+    server.login(user, password)
+    server.send_message(msg)
+
+print('邮件发送成功')
+EOF
           
           export DATE_STR="$DATE_STR"
           python send_email.py
