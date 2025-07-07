@@ -60,7 +60,7 @@ jobs:
           fi
         fi
     
-    - name: Create simple homepage
+    - name: Create homepage
       run: |
         mkdir -p docs
         echo '<!DOCTYPE html>' > docs/index.html
@@ -92,34 +92,46 @@ jobs:
       id: deployment
       uses: actions/deploy-pages@v4
     
-    - name: Send email notification
+    - name: Create email script
+      if: success()
+      run: |
+        cat > send_email.py << 'EOF'
+        import smtplib
+        import os
+        from email.mime.text import MIMEText
+        from datetime import datetime
+        
+        user = os.getenv('EMAIL_USER')
+        password = os.getenv('EMAIL_PASSWORD')
+        recipients = os.getenv('EMAIL_RECIPIENTS', '').split(',')
+        date_str = os.getenv('DATE_STR', '')
+        
+        if user and password and recipients:
+            content = f'ARM KVM Weekly Report - {date_str}\n\nAnalysis completed successfully.\n\nView online: https://onlinefchen.github.io/kvmarm-robot/reports/{date_str}/\n\nGenerated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} GMT+8'
+            
+            msg = MIMEText(content, 'plain', 'utf-8')
+            msg['Subject'] = f'ARM KVM Report - {date_str}'
+            msg['From'] = user
+            msg['To'] = ', '.join([r.strip() for r in recipients if r.strip()])
+            
+            with smtplib.SMTP('smtp.gmail.com', 587) as server:
+                server.starttls()
+                server.login(user, password)
+                server.send_message(msg)
+            
+            print('Email notification sent successfully')
+        else:
+            print('Email configuration incomplete')
+        EOF
+    
+    - name: Send notification
       if: success()
       env:
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS }}
       run: |
-        if [ -n "$EMAIL_USER" ] && [ -n "$EMAIL_PASSWORD" ] && [ -n "$EMAIL_RECIPIENTS" ]; then
-          LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
-          DATE_STR=$(basename "$LATEST_DIR" 2>/dev/null || date +%Y-%m-%d)
-          export DATE_STR
-          python3 -c "
-import smtplib, os
-from email.mime.text import MIMEText
-from datetime import datetime
-user = os.getenv('EMAIL_USER')
-password = os.getenv('EMAIL_PASSWORD')
-recipients = os.getenv('EMAIL_RECIPIENTS', '').split(',')
-date_str = os.getenv('DATE_STR', '')
-content = f'ARM KVM Weekly Report - {date_str}\n\nAnalysis completed.\n\nView: https://onlinefchen.github.io/kvmarm-robot/reports/{date_str}/\n\nGenerated: {datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")} GMT+8'
-msg = MIMEText(content, 'plain', 'utf-8')
-msg['Subject'] = f'ARM KVM Report - {date_str}'
-msg['From'] = user
-msg['To'] = ', '.join([r.strip() for r in recipients if r.strip()])
-with smtplib.SMTP('smtp.gmail.com', 587) as server:
-    server.starttls()
-    server.login(user, password)
-    server.send_message(msg)
-print('Email sent successfully')
-"
-        fi
+        LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
+        DATE_STR=$(basename "$LATEST_DIR" 2>/dev/null || date +%Y-%m-%d)
+        export DATE_STR
+        python send_email.py
