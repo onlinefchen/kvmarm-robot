@@ -181,7 +181,7 @@ jobs:
                     </div>
                     
                     <div class="report-grid" id="reportGrid">
-        EOF
+EOF
         
         # 添加报告卡片
         for report_dir in docs/reports/*/; do
@@ -219,7 +219,7 @@ jobs:
             </div>
         </body>
         </html>
-        EOF
+EOF
         
         echo "🌐 GitHub Pages结构已准备完成"
     
@@ -249,99 +249,44 @@ jobs:
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS || secrets.EMAIL_RECIPIENTS }}
+        SMTP_SERVER: ${{ vars.SMTP_SERVER || 'smtp.gmail.com' }}
+        SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
       run: |
         if [ -n "$EMAIL_USER" ] && [ -n "$EMAIL_PASSWORD" ] && [ -n "$EMAIL_RECIPIENTS" ]; then
-          # 获取分析结果统计
+          # 获取分析结果
           LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
-          DATE_STR=$(basename "$LATEST_DIR")
+          DATE_STR=$(basename "$LATEST_DIR" 2>/dev/null || date +%Y-%m-%d)
           
-          # 尝试从statistics.json获取统计信息
-          if [ -f "$LATEST_DIR/statistics.json" ]; then
-            STATS="数据分析完成，详情请查看在线报告"
-          else
-            STATS="数据分析完成"
-          fi
-          
-          # 创建邮件发送脚本
-          cat > send_email.py << 'EOF'
-import smtplib
+          # 发送邮件通知
+          python3 -c """
+import smtplib, os
 from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import os
 from datetime import datetime
 
-# 邮件配置
 smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
 smtp_port = int(os.getenv('SMTP_PORT', '587'))
 user = os.getenv('EMAIL_USER')
 password = os.getenv('EMAIL_PASSWORD')
-recipients = os.getenv('EMAIL_RECIPIENTS', '').split(',')
+recipients = [r.strip() for r in os.getenv('EMAIL_RECIPIENTS', '').split(',') if r.strip()]
+date_str = '${DATE_STR}'
 
-# 创建邮件
-msg = MIMEMultipart('alternative')
-msg['Subject'] = f"✅ ARM KVM周报 - {os.getenv('DATE_STR', datetime.now().strftime('%Y-%m-%d'))}"
+# 创建简单文本邮件
+content = f'''✅ ARM KVM周报生成完成 - {date_str}
+
+📊 数据分析已完成，详情请查看在线报告
+
+🔗 在线查看: https://onlinefchen.github.io/kvmarm-robot/reports/{date_str}/
+🏠 历史报告: https://onlinefchen.github.io/kvmarm-robot
+📧 邮件归档: https://lore.kernel.org/kvmarm/
+
+🤖 ARM KVM分析机器人
+生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (东八区)
+'''
+
+msg = MIMEText(content, 'plain', 'utf-8')
+msg['Subject'] = f'✅ ARM KVM周报 - {date_str}'
 msg['From'] = user
-msg['To'] = ', '.join([r.strip() for r in recipients if r.strip()])
-
-# 邮件内容
-html_content = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <style>
-        body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px; border-radius: 10px; }}
-        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2rem; text-align: center; border-radius: 10px; margin-bottom: 20px; }}
-        .content {{ background: white; padding: 20px; border-radius: 8px; }}
-        .footer {{ text-align: center; margin-top: 20px; color: #666; }}
-        .button {{ display: inline-block; background: #3498db; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 10px 5px; }}
-        .stats {{ background: #e8f4f8; padding: 15px; border-radius: 8px; margin: 15px 0; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📊 ARM KVM 周报</h1>
-            <p>{datetime.now().strftime('%Y年%m月%d日')} • 自动生成</p>
-        </div>
-        
-        <div class="content">
-            <h2>🎉 分析完成</h2>
-            <div class="stats">
-                <h3>📈 本周统计</h3>
-                <p>📊 {os.getenv('STATS', '数据分析完成，详情请查看在线报告')}</p>
-                <p>🕒 分析时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (东八区)</p>
-            </div>
-            
-            <h3>🔗 查看报告</h3>
-            <p>
-                <a href="https://onlinefchen.github.io/kvmarm-robot/reports/{os.getenv('DATE_STR', '')}/" class="button">📱 在线查看</a>
-                <a href="https://onlinefchen.github.io/kvmarm-robot" class="button">🏠 历史报告</a>
-                <a href="https://lore.kernel.org/kvmarm/" class="button">📧 邮件归档</a>
-            </p>
-            
-            <h3>📋 报告内容</h3>
-            <ul>
-                <li>🔥 重要技术讨论和补丁分析</li>
-                <li>📈 社区活跃度和贡献者统计</li>
-                <li>🎯 技术趋势和发展方向</li>
-                <li>🔗 完整的lore.kernel.org链接</li>
-            </ul>
-        </div>
-        
-        <div class="footer">
-            <p>🤖 由ARM KVM分析机器人自动生成</p>
-            <p>💻 <a href="https://github.com/onlinefchen/kvmarm-robot">项目源码</a></p>
-        </div>
-    </div>
-</body>
-</html>
-"""
-
-# 发送邮件
-html_part = MIMEText(html_content, 'html', 'utf-8')
-msg.attach(html_part)
+msg['To'] = ', '.join(recipients)
 
 with smtplib.SMTP(smtp_server, smtp_port) as server:
     server.starttls()
@@ -349,10 +294,7 @@ with smtplib.SMTP(smtp_server, smtp_port) as server:
     server.send_message(msg)
 
 print('✅ 成功通知邮件已发送')
-EOF
-
-          # 执行邮件发送
-          python3 send_email.py
+"""
         else
           echo "⚠️ 邮件配置不完整，跳过邮件通知"
         fi
@@ -366,14 +308,11 @@ EOF
         GITHUB_RUN_ID: ${{ github.run_id }}
       run: |
         if [ -n "$EMAIL_USER" ] && [ -n "$EMAIL_PASSWORD" ] && [ -n "$EMAIL_RECIPIENTS" ]; then
-          # 创建失败通知脚本
-          cat > send_failure_email.py << 'EOF'
-import smtplib
+          python3 -c """
+import smtplib, os
 from email.mime.text import MIMEText
-import os
 from datetime import datetime
 
-# 邮件配置
 smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
 smtp_port = int(os.getenv('SMTP_PORT', '587'))
 user = os.getenv('EMAIL_USER')
@@ -381,8 +320,7 @@ password = os.getenv('EMAIL_PASSWORD')
 recipients = [r.strip() for r in os.getenv('EMAIL_RECIPIENTS', '').split(',') if r.strip()]
 run_id = os.getenv('GITHUB_RUN_ID', '')
 
-# 创建邮件内容
-content = f"""❌ ARM KVM邮件分析失败
+content = f'''❌ ARM KVM邮件分析失败
 
 📅 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (东八区)
 🔗 查看详情: https://github.com/onlinefchen/kvmarm-robot/actions/runs/{run_id}
@@ -390,24 +328,20 @@ content = f"""❌ ARM KVM邮件分析失败
 请检查GitHub Actions日志排查问题。
 
 ---
-🤖 ARM KVM分析机器人"""
+🤖 ARM KVM分析机器人'''
 
 msg = MIMEText(content, 'plain', 'utf-8')
 msg['Subject'] = f'❌ ARM KVM周报生成失败 - {datetime.now().strftime("%Y-%m-%d")}'
 msg['From'] = user
 msg['To'] = ', '.join(recipients)
 
-# 发送邮件
 with smtplib.SMTP(smtp_server, smtp_port) as server:
     server.starttls()
     server.login(user, password)
     server.send_message(msg)
 
 print('📧 失败通知邮件已发送')
-EOF
-          
-          # 执行失败通知脚本
-          python3 send_failure_email.py
+"""
         else
           echo "⚠️ 邮件配置不完整，跳过失败通知"
         fi
