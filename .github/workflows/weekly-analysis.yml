@@ -1,4 +1,4 @@
-name: ARM KVM Weekly Analysis
+name: ARM KVM Analysis
 
 on:
   schedule:
@@ -7,7 +7,6 @@ on:
     inputs:
       days_back:
         description: 'Days to analyze'
-        required: false
         default: '7'
         type: string
 
@@ -23,28 +22,17 @@ jobs:
       name: github-pages
     
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
     
-    - name: Setup Python
-      uses: actions/setup-python@v5
+    - uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         cache: 'pip'
     
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install markdown click
-    
-    - name: Configure Git
-      run: |
-        git config --global user.name "ARM KVM Bot"
-        git config --global user.email "bot@arm-kvm.github.io"
-    
-    - name: Set timezone
-      run: sudo timedatectl set-timezone Asia/Shanghai
     
     - name: Run analysis
       env:
@@ -59,18 +47,12 @@ jobs:
         echo "Analysis period: ${START_DATE} to ${END_DATE}"
         python analyze.py main --since ${START_DATE} --until ${END_DATE} --output results --language zh --verify-completeness --send-notifications
     
-    - name: Generate HTML
+    - name: Generate reports
       run: |
         LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
         if [ -n "$LATEST_DIR" ]; then
           python html_generator.py --results-dir "$LATEST_DIR" --github-repo "https://onlinefchen.github.io/kvmarm-robot"
-        fi
-    
-    - name: Prepare Pages
-      run: |
-        mkdir -p docs/reports
-        LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
-        if [ -n "$LATEST_DIR" ]; then
+          mkdir -p docs/reports
           DATE_DIR=$(basename "$LATEST_DIR")
           cp -r "$LATEST_DIR" "docs/reports/$DATE_DIR"
           if [ -f "$LATEST_DIR/report.html" ]; then
@@ -78,69 +60,39 @@ jobs:
           fi
         fi
     
-    - name: Create homepage
+    - name: Create simple homepage
       run: |
-        cat > docs/index.html << 'HTMLEOF'
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="utf-8">
-    <title>ARM KVM Analysis Reports</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .header { background: #2c3e50; color: white; padding: 20px; border-radius: 10px; }
-        .content { margin: 20px 0; }
-        .report-card { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px; }
-        .link { display: inline-block; background: #3498db; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; margin: 5px; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>ARM KVM Mailing List Analysis</h1>
-        <p>Automated Technical Analysis • Weekly Updates</p>
-    </div>
-    <div class="content">
-        <h2>Latest Reports</h2>
-HTMLEOF
-        
+        mkdir -p docs
+        echo '<!DOCTYPE html>' > docs/index.html
+        echo '<html><head><title>ARM KVM Reports</title></head>' >> docs/index.html
+        echo '<body><h1>ARM KVM Analysis Reports</h1>' >> docs/index.html
+        echo '<p>Automated weekly analysis of ARM KVM mailing list</p>' >> docs/index.html
         for report_dir in docs/reports/*/; do
           if [ -d "$report_dir" ]; then
             date=$(basename "$report_dir")
-            echo "        <div class=\"report-card\">" >> docs/index.html
-            echo "            <h3>$date Report</h3>" >> docs/index.html
-            echo "            <a href=\"reports/$date/\" class=\"link\">View Report</a>" >> docs/index.html
-            echo "            <a href=\"reports/$date/analysis_report_zh.md\" class=\"link\">Markdown</a>" >> docs/index.html
-            echo "        </div>" >> docs/index.html
+            echo "<p><a href=\"reports/$date/\">Report $date</a></p>" >> docs/index.html
           fi
         done
-        
-        cat >> docs/index.html << 'HTMLEOF'
-    </div>
-</body>
-</html>
-HTMLEOF
+        echo '</body></html>' >> docs/index.html
     
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v4
       if: always()
       with:
         name: analysis-results
         path: results/
         retention-days: 30
     
-    - name: Configure Pages
-      uses: actions/configure-pages@v4
+    - uses: actions/configure-pages@v4
     
-    - name: Upload Pages
-      uses: actions/upload-pages-artifact@v3
+    - uses: actions/upload-pages-artifact@v3
       with:
         path: docs
     
-    - name: Deploy Pages
+    - name: Deploy to Pages
       id: deployment
       uses: actions/deploy-pages@v4
     
-    - name: Send notification
+    - name: Send email notification
       if: success()
       env:
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
@@ -150,40 +102,24 @@ HTMLEOF
         if [ -n "$EMAIL_USER" ] && [ -n "$EMAIL_PASSWORD" ] && [ -n "$EMAIL_RECIPIENTS" ]; then
           LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
           DATE_STR=$(basename "$LATEST_DIR" 2>/dev/null || date +%Y-%m-%d)
-          
+          export DATE_STR
           python3 -c "
-import smtplib
-import os
+import smtplib, os
 from email.mime.text import MIMEText
 from datetime import datetime
-
 user = os.getenv('EMAIL_USER')
 password = os.getenv('EMAIL_PASSWORD')
 recipients = os.getenv('EMAIL_RECIPIENTS', '').split(',')
 date_str = os.getenv('DATE_STR', '')
-
-content = f'''ARM KVM Weekly Report - {date_str}
-
-Analysis completed successfully. View the detailed report online.
-
-Online Report: https://onlinefchen.github.io/kvmarm-robot/reports/{date_str}/
-All Reports: https://onlinefchen.github.io/kvmarm-robot
-
-Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (GMT+8)
-'''
-
+content = f'ARM KVM Weekly Report - {date_str}\n\nAnalysis completed.\n\nView: https://onlinefchen.github.io/kvmarm-robot/reports/{date_str}/\n\nGenerated: {datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")} GMT+8'
 msg = MIMEText(content, 'plain', 'utf-8')
-msg['Subject'] = f'ARM KVM Weekly Report - {date_str}'
+msg['Subject'] = f'ARM KVM Report - {date_str}'
 msg['From'] = user
 msg['To'] = ', '.join([r.strip() for r in recipients if r.strip()])
-
 with smtplib.SMTP('smtp.gmail.com', 587) as server:
     server.starttls()
     server.login(user, password)
     server.send_message(msg)
-
-print('Email notification sent successfully')
-" DATE_STR="$DATE_STR"
-        else
-          echo "Email configuration incomplete, skipping notification"
+print('Email sent successfully')
+"
         fi
