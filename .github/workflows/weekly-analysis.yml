@@ -1,0 +1,201 @@
+name: ARM KVM Weekly Analysis
+
+on:
+  schedule:
+    - cron: '0 1 * * 1'  # 每周一 UTC 01:00 = 东八区 09:00
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: '分析过去多少天的邮件'
+        required: false
+        default: '7'
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 签出代码
+      uses: actions/checkout@v4
+    
+    - name: 设置Python环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install markdown click
+    
+    - name: 配置Git
+      run: |
+        git config --global user.name "ARM KVM Bot"
+        git config --global user.email "bot@arm-kvm.github.io"
+    
+    - name: 设置时区
+      run: sudo timedatectl set-timezone Asia/Shanghai
+    
+    - name: 运行邮件分析
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS }}
+      run: |
+        DAYS_BACK="${{ github.event.inputs.days_back || '7' }}"
+        END_DATE=$(date +%Y-%m-%d)
+        START_DATE=$(date -d "${DAYS_BACK} days ago" +%Y-%m-%d)
+        
+        echo "分析时间范围: ${START_DATE} 到 ${END_DATE}"
+        
+        python analyze.py main \
+          --since ${START_DATE} \
+          --until ${END_DATE} \
+          --output results \
+          --language zh \
+          --verify-completeness \
+          --send-notifications
+    
+    - name: 生成HTML报告
+      run: |
+        LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
+        if [ -n "$LATEST_DIR" ]; then
+          python html_generator.py \
+            --results-dir "$LATEST_DIR" \
+            --github-repo "https://onlinefchen.github.io/kvmarm-robot"
+        fi
+    
+    - name: 准备GitHub Pages
+      run: |
+        mkdir -p docs/reports
+        LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
+        if [ -n "$LATEST_DIR" ]; then
+          DATE_DIR=$(basename "$LATEST_DIR")
+          cp -r "$LATEST_DIR" "docs/reports/$DATE_DIR"
+          if [ -f "$LATEST_DIR/report.html" ]; then
+            cp "$LATEST_DIR/report.html" "docs/reports/$DATE_DIR/index.html"
+          fi
+        fi
+    
+    - name: 创建主页
+      run: |
+        cat > docs/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html lang="zh-CN">
+        <head>
+            <meta charset="utf-8">
+            <title>ARM KVM 邮件分析报告</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                .header { background: #2c3e50; color: white; padding: 20px; border-radius: 10px; }
+                .content { margin: 20px 0; }
+                .report-card { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px; }
+                .link { display: inline-block; background: #3498db; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; margin: 5px; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>ARM KVM 邮件列表分析</h1>
+                <p>自动化技术分析 • 每周更新</p>
+            </div>
+            <div class="content">
+                <h2>最新报告</h2>
+        EOF
+        
+        for report_dir in docs/reports/*/; do
+          if [ -d "$report_dir" ]; then
+            date=$(basename "$report_dir")
+            cat >> docs/index.html << EOF
+                <div class="report-card">
+                    <h3>$date 报告</h3>
+                    <a href="reports/$date/" class="link">查看报告</a>
+                    <a href="reports/$date/analysis_report_zh.md" class="link">Markdown</a>
+                </div>
+        EOF
+          fi
+        done
+        
+        cat >> docs/index.html << 'EOF'
+            </div>
+        </body>
+        </html>
+        EOF
+    
+    - name: 上传调试文件
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: analysis-results
+        path: results/
+        retention-days: 30
+    
+    - name: 配置Pages
+      uses: actions/configure-pages@v4
+    
+    - name: 上传Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: docs
+    
+    - name: 部署Pages
+      uses: actions/deploy-pages@v4
+    
+    - name: 发送通知邮件
+      if: success()
+      env:
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS }}
+      run: |
+        if [ -n "$EMAIL_USER" ] && [ -n "$EMAIL_PASSWORD" ] && [ -n "$EMAIL_RECIPIENTS" ]; then
+          LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
+          DATE_STR=$(basename "$LATEST_DIR" 2>/dev/null || date +%Y-%m-%d)
+          
+          cat > send_email.py << 'EOF'
+        import smtplib
+        import os
+        from email.mime.text import MIMEText
+        from datetime import datetime
+        
+        user = os.getenv('EMAIL_USER')
+        password = os.getenv('EMAIL_PASSWORD')
+        recipients = os.getenv('EMAIL_RECIPIENTS', '').split(',')
+        date_str = os.getenv('DATE_STR', '')
+        
+        content = f"""ARM KVM周报 - {date_str}
+        
+        数据分析已完成，详情请查看在线报告
+        
+        在线查看: https://onlinefchen.github.io/kvmarm-robot/reports/{date_str}/
+        历史报告: https://onlinefchen.github.io/kvmarm-robot
+        
+        生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (东八区)
+        """
+        
+        msg = MIMEText(content, 'plain', 'utf-8')
+        msg['Subject'] = f'ARM KVM周报 - {date_str}'
+        msg['From'] = user
+        msg['To'] = ', '.join([r.strip() for r in recipients if r.strip()])
+        
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.starttls()
+            server.login(user, password)
+            server.send_message(msg)
+        
+        print('邮件发送成功')
+        EOF
+          
+          export DATE_STR="$DATE_STR"
+          python send_email.py
+        else
+          echo "邮件配置不完整，跳过通知"
+        fi
