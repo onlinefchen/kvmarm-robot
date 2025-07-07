@@ -19,6 +19,9 @@ permissions:
 jobs:
   analysis:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     
     steps:
     - name: 签出代码
@@ -147,6 +150,7 @@ EOF
         path: docs
     
     - name: 部署Pages
+      id: deployment
       uses: actions/deploy-pages@v4
     
     - name: 发送通知邮件
