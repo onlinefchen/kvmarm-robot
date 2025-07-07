@@ -1,0 +1,407 @@
+name: ARM KVM Weekly Analyzer
+
+on:
+  # 每周一上午9点 (东八区 UTC+8)，转换为UTC时间为凌晨1点
+  schedule:
+    - cron: '0 1 * * 1'  # 每周一 UTC 01:00 = 东八区 09:00
+  
+  # 允许手动触发
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: '分析过去多少天的邮件'
+        required: false
+        default: '7'
+        type: string
+      send_notifications:
+        description: '是否发送通知'
+        required: false
+        default: true
+        type: boolean
+
+# 设置权限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 确保只有一个工作流实例运行
+concurrency:
+  group: "arm-kvm-analyzer"
+  cancel-in-progress: false
+
+jobs:
+  analyze-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🚀 签出代码
+      uses: actions/checkout@v4
+    
+    - name: 🐍 设置Python环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: 📦 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        # 确保关键包已安装
+        pip install markdown>=3.5.0 click>=8.1.7
+    
+    - name: ⚙️ 配置Git
+      run: |
+        git config --global user.name "ARM KVM Analyzer Bot"
+        git config --global user.email "analyzer@arm-kvm-bot.github.io"
+    
+    - name: 📧 运行ARM KVM邮件分析
+      env:
+        # AI分析配置
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        AI_PROVIDER: openai
+        
+        # 邮件通知配置
+        ENABLE_EMAIL: true
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS || secrets.EMAIL_RECIPIENTS }}
+        SMTP_SERVER: ${{ vars.SMTP_SERVER || 'smtp.gmail.com' }}
+        SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
+        
+        # 可选的其他通知配置
+        ENABLE_LARK: ${{ vars.ENABLE_LARK || 'false' }}
+        LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+        LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
+        
+        ENABLE_TELEGRAM: ${{ vars.ENABLE_TELEGRAM || 'false' }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ vars.TELEGRAM_CHAT_ID }}
+        
+        # 系统配置
+        DEFAULT_LANGUAGE: zh
+        VERIFY_COMPLETENESS: true
+        DEBUG: false
+        TZ: Asia/Shanghai  # 设置时区为东八区
+      
+      run: |
+        # 设置时区
+        sudo timedatezone set Asia/Shanghai
+        
+        # 计算分析时间范围
+        DAYS_BACK="${{ github.event.inputs.days_back || '7' }}"
+        echo "📅 分析过去 ${DAYS_BACK} 天的邮件"
+        
+        # 计算日期
+        END_DATE=$(date +%Y-%m-%d)
+        START_DATE=$(date -d "${DAYS_BACK} days ago" +%Y-%m-%d)
+        
+        echo "🕒 分析时间范围: ${START_DATE} 到 ${END_DATE}"
+        echo "🌏 当前东八区时间: $(TZ=Asia/Shanghai date)"
+        
+        # 构建分析命令
+        ANALYZE_CMD="python analyze.py main --since ${START_DATE} --until ${END_DATE} --output results --language zh --verify-completeness"
+        
+        # 是否发送通知
+        if [ "${{ github.event.inputs.send_notifications }}" = "true" ] || [ "${{ github.event_name }}" = "schedule" ]; then
+          ANALYZE_CMD="$ANALYZE_CMD --send-notifications"
+          echo "📬 将发送通知到配置的平台"
+        fi
+        
+        # 执行分析
+        echo "🚀 执行命令: $ANALYZE_CMD"
+        $ANALYZE_CMD
+    
+    - name: 🌐 生成HTML报告和GitHub Pages部署
+      run: |
+        # 查找最新的结果目录
+        LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
+        
+        if [ -z "$LATEST_DIR" ]; then
+          echo "❌ 未找到分析结果目录"
+          exit 1
+        fi
+        
+        echo "📁 找到结果目录: $LATEST_DIR"
+        
+        # 创建GitHub Pages目录结构
+        mkdir -p docs/reports
+        
+        # 复制结果到docs目录
+        DATE_DIR=$(basename "$LATEST_DIR")
+        cp -r "$LATEST_DIR" "docs/reports/$DATE_DIR"
+        
+        # 生成HTML报告
+        python html_generator.py --results-dir "$LATEST_DIR" --github-repo "https://onlinefchen.github.io/kvmarm-robot"
+        
+        # 如果有HTML文件，复制到docs目录
+        if [ -f "$LATEST_DIR/report.html" ]; then
+          cp "$LATEST_DIR/report.html" "docs/reports/$DATE_DIR/index.html"
+          echo "✅ HTML报告已复制到GitHub Pages目录"
+        fi
+        
+        # 生成主页index.html
+        cat > docs/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html lang="zh-CN">
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>ARM KVM 邮件列表分析报告</title>
+            <style>
+                body { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; margin: 0; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
+                .container { max-width: 1000px; margin: 0 auto; background: white; border-radius: 15px; box-shadow: 0 20px 60px rgba(0,0,0,0.1); overflow: hidden; }
+                .header { background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%); color: white; padding: 3rem 2rem; text-align: center; }
+                .header h1 { font-size: 2.5rem; margin: 0 0 0.5rem 0; font-weight: 300; }
+                .content { padding: 2rem; }
+                .report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 1.5rem; margin: 2rem 0; }
+                .report-card { border: 1px solid #e0e0e0; border-radius: 12px; padding: 1.5rem; background: #f8f9fa; transition: transform 0.3s ease, box-shadow 0.3s ease; }
+                .report-card:hover { transform: translateY(-5px); box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+                .report-card h3 { color: #2c3e50; margin-top: 0; }
+                .report-links a { display: inline-block; margin: 0.25rem 0.5rem 0.25rem 0; padding: 0.5rem 1rem; background: #3498db; color: white; text-decoration: none; border-radius: 6px; transition: background 0.3s ease; }
+                .report-links a:hover { background: #2980b9; }
+                .footer { background: #2c3e50; color: white; padding: 2rem; text-align: center; }
+                .stats { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 10px; margin: 1.5rem 0; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>📊 ARM KVM 邮件列表分析报告</h1>
+                    <p>自动化技术分析 • 每周更新 • AI驱动</p>
+                </div>
+                
+                <div class="content">
+                    <div class="stats">
+                        <h3>📈 系统状态</h3>
+                        <p>🤖 自动分析ARM KVM邮件列表，每周一东八区上午9点更新</p>
+                        <p>🔗 <strong>邮件归档</strong>: <a href="https://lore.kernel.org/kvmarm/" style="color: #fff;">lore.kernel.org/kvmarm</a></p>
+                        <p>⏰ <strong>最后更新</strong>: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')</p>
+                    </div>
+                    
+                    <div class="report-grid" id="reportGrid">
+        EOF
+        
+        # 添加报告卡片
+        for report_dir in docs/reports/*/; do
+          if [ -d "$report_dir" ]; then
+            date=$(basename "$report_dir")
+            echo "                        <div class=\"report-card\">" >> docs/index.html
+            echo "                            <h3>📅 $date</h3>" >> docs/index.html
+            echo "                            <p>ARM KVM技术动态和开发分析</p>" >> docs/index.html
+            echo "                            <div class=\"report-links\">" >> docs/index.html
+            
+            if [ -f "$report_dir/index.html" ]; then
+              echo "                                <a href=\"reports/$date/\">📱 查看报告</a>" >> docs/index.html
+            fi
+            if [ -f "$report_dir/analysis_report_zh.md" ]; then
+              echo "                                <a href=\"reports/$date/analysis_report_zh.md\">📄 Markdown</a>" >> docs/index.html
+            fi
+            if [ -f "$report_dir/statistics.json" ]; then
+              echo "                                <a href=\"reports/$date/statistics.json\">📊 数据</a>" >> docs/index.html
+            fi
+            
+            echo "                            </div>" >> docs/index.html
+            echo "                        </div>" >> docs/index.html
+          fi
+        done
+        
+        # 完成HTML
+        cat >> docs/index.html << 'EOF'
+                    </div>
+                </div>
+                
+                <div class="footer">
+                    <p>🤖 由ARM KVM分析机器人自动生成</p>
+                    <p>🔗 <a href="https://github.com/onlinefchen/kvmarm-robot" style="color: #3498db;">项目源码</a></p>
+                </div>
+            </div>
+        </body>
+        </html>
+        EOF
+        
+        echo "🌐 GitHub Pages结构已准备完成"
+    
+    - name: 📤 上传分析结果（用于调试）
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: arm-kvm-analysis-${{ github.run_number }}
+        path: results/
+        retention-days: 30
+    
+    - name: 🚀 配置GitHub Pages
+      uses: actions/configure-pages@v4
+    
+    - name: 📦 上传到GitHub Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: './docs'
+    
+    - name: 🌐 部署到GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
+    
+    - name: 📬 发送成功通知邮件
+      if: success()
+      env:
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS || secrets.EMAIL_RECIPIENTS }}
+      run: |
+        if [ -n "$EMAIL_USER" ] && [ -n "$EMAIL_PASSWORD" ] && [ -n "$EMAIL_RECIPIENTS" ]; then
+          # 获取分析结果统计
+          LATEST_DIR=$(find results -name "20*" -type d | sort | tail -1)
+          DATE_STR=$(basename "$LATEST_DIR")
+          
+          # 尝试从statistics.json获取统计信息
+          if [ -f "$LATEST_DIR/statistics.json" ]; then
+            STATS=$(cat "$LATEST_DIR/statistics.json" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+overview = data.get('overview', {})
+print(f\"{overview.get('total_messages', 0)} 封邮件, {overview.get('total_threads', 0)} 个线程, {overview.get('unique_contributors', 0)} 位贡献者\")
+")
+          else
+            STATS="数据分析完成"
+          fi
+          
+          # 发送邮件通知
+          python3 -c "
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import os
+from datetime import datetime
+
+# 邮件配置
+smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+smtp_port = int(os.getenv('SMTP_PORT', '587'))
+user = os.getenv('EMAIL_USER')
+password = os.getenv('EMAIL_PASSWORD')
+recipients = os.getenv('EMAIL_RECIPIENTS').split(',')
+
+# 创建邮件
+msg = MIMEMultipart('alternative')
+msg['Subject'] = f'✅ ARM KVM周报 - {os.getenv('DATE_STR', datetime.now().strftime('%Y-%m-%d'))}'
+msg['From'] = user
+msg['To'] = ', '.join(recipients)
+
+# 邮件内容
+html_content = f'''
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=\"utf-8\">
+    <style>
+        body {{ font-family: 'PingFang SC', Arial, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px; border-radius: 10px; }}
+        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2rem; text-align: center; border-radius: 10px; margin-bottom: 20px; }}
+        .content {{ background: white; padding: 20px; border-radius: 8px; }}
+        .footer {{ text-align: center; margin-top: 20px; color: #666; }}
+        .button {{ display: inline-block; background: #3498db; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin: 10px 5px; }}
+        .stats {{ background: #e8f4f8; padding: 15px; border-radius: 8px; margin: 15px 0; }}
+    </style>
+</head>
+<body>
+    <div class=\"container\">
+        <div class=\"header\">
+            <h1>📊 ARM KVM 周报</h1>
+            <p>{datetime.now().strftime('%Y年%m月%d日')} • 自动生成</p>
+        </div>
+        
+        <div class=\"content\">
+            <h2>🎉 分析完成</h2>
+            <div class=\"stats\">
+                <h3>📈 本周统计</h3>
+                <p>📊 {os.getenv('STATS', '统计信息加载中...')}</p>
+                <p>🕒 分析时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (东八区)</p>
+            </div>
+            
+            <h3>🔗 查看报告</h3>
+            <p>
+                <a href=\"https://onlinefchen.github.io/kvmarm-robot/reports/{os.getenv('DATE_STR', '')}/\" class=\"button\">📱 在线查看</a>
+                <a href=\"https://onlinefchen.github.io/kvmarm-robot\" class=\"button\">🏠 历史报告</a>
+                <a href=\"https://lore.kernel.org/kvmarm/\" class=\"button\">📧 邮件归档</a>
+            </p>
+            
+            <h3>📋 报告内容</h3>
+            <ul>
+                <li>🔥 重要技术讨论和补丁分析</li>
+                <li>📈 社区活跃度和贡献者统计</li>
+                <li>🎯 技术趋势和发展方向</li>
+                <li>🔗 完整的lore.kernel.org链接</li>
+            </ul>
+        </div>
+        
+        <div class=\"footer\">
+            <p>🤖 由ARM KVM分析机器人自动生成</p>
+            <p>💻 <a href=\"https://github.com/onlinefchen/kvmarm-robot\">项目源码</a></p>
+        </div>
+    </div>
+</body>
+</html>
+'''
+
+# 发送邮件
+html_part = MIMEText(html_content, 'html', 'utf-8')
+msg.attach(html_part)
+
+with smtplib.SMTP(smtp_server, smtp_port) as server:
+    server.starttls()
+    server.login(user, password)
+    server.send_message(msg)
+
+print('✅ 成功通知邮件已发送')
+" EMAIL_USER="$EMAIL_USER" EMAIL_PASSWORD="$EMAIL_PASSWORD" EMAIL_RECIPIENTS="$EMAIL_RECIPIENTS" DATE_STR="$DATE_STR" STATS="$STATS"
+        else
+          echo "⚠️ 邮件配置不完整，跳过邮件通知"
+        fi
+    
+    - name: 💥 发送失败通知
+      if: failure()
+      env:
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        EMAIL_RECIPIENTS: ${{ vars.EMAIL_RECIPIENTS || secrets.EMAIL_RECIPIENTS }}
+      run: |
+        if [ -n "$EMAIL_USER" ] && [ -n "$EMAIL_PASSWORD" ] && [ -n "$EMAIL_RECIPIENTS" ]; then
+          python3 -c "
+import smtplib
+from email.mime.text import MIMEText
+import os
+from datetime import datetime
+
+# 发送失败通知
+smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+user = os.getenv('EMAIL_USER')
+password = os.getenv('EMAIL_PASSWORD')
+recipients = os.getenv('EMAIL_RECIPIENTS').split(',')
+
+msg = MIMEText(f'''
+❌ ARM KVM邮件分析失败
+
+📅 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (东八区)
+🔗 查看详情: https://github.com/onlinefchen/kvmarm-robot/actions/runs/${{ github.run_id }}
+
+请检查GitHub Actions日志排查问题。
+
+---
+🤖 ARM KVM分析机器人
+''', 'plain', 'utf-8')
+
+msg['Subject'] = f'❌ ARM KVM周报生成失败 - {datetime.now().strftime('%Y-%m-%d')}'
+msg['From'] = user
+msg['To'] = ', '.join(recipients)
+
+with smtplib.SMTP(smtp_server, 587) as server:
+    server.starttls()
+    server.login(user, password)
+    server.send_message(msg)
+
+print('📧 失败通知邮件已发送')
+" EMAIL_USER="$EMAIL_USER" EMAIL_PASSWORD="$EMAIL_PASSWORD" EMAIL_RECIPIENTS="$EMAIL_RECIPIENTS"
+        else
+          echo "⚠️ 邮件配置不完整，跳过失败通知"
+        fi

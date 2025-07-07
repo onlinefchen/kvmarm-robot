@@ -1,0 +1,52 @@
+# 邮件解析器修复建议
+
+## 1. 放宽验证规则
+在 _is_valid_email 函数中：
+- 允许某些字段为空（如某些自动生成的邮件可能没有标准格式）
+- 改进Message-ID格式检查
+
+## 2. 更好的错误处理
+- 区分不同类型的失败（缺少文件、格式错误、编码问题）
+- 提供更详细的错误信息
+
+## 3. 过滤非邮件commits
+- 跳过合并commits
+- 跳过没有'm'文件的commits
+- 识别并跳过仓库维护commits
+
+## 4. 建议的代码修改：
+
+```python
+def _is_valid_email(email_node: EmailNode) -> bool:
+    """验证邮件节点是否有效 - 放宽规则"""
+    # 至少需要一个标识符
+    if not email_node.message_id and not email_node.subject:
+        return False
+    
+    # 允许某些字段为空，但不能全为空
+    if not any([email_node.message_id, email_node.subject, email_node.sender]):
+        return False
+    
+    # Message-ID格式检查 - 更宽松
+    if email_node.message_id:
+        # 只检查基本格式，允许更多字符
+        if not re.match(r'^[^\s]+$', email_node.message_id):
+            return False
+    
+    return True
+
+def extract_emails_by_date_range(...):
+    # 在循环中添加过滤
+    for i, commit in enumerate(commits):
+        # 跳过合并commits
+        if len(commit.parents) > 1:
+            failed_commits.append((commit.hexsha, "Merge commit"))
+            continue
+            
+        # 检查是否有'm'文件
+        if 'm' not in commit.tree:
+            failed_commits.append((commit.hexsha, "No 'm' file"))
+            continue
+        
+        # ... 继续处理
+```
