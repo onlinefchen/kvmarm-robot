@@ -220,17 +220,20 @@ def extract_emails_by_date_range(
 
 def _is_valid_email(email_node: EmailNode) -> bool:
     """验证邮件节点是否有效"""
-    # 基本字段检查
-    if not email_node.message_id or not email_node.subject or not email_node.sender:
-        return False
-    
-    # Message-ID格式检查
-    if not re.match(r'^[a-zA-Z0-9\.\-_@]+$', email_node.message_id.replace('<', '').replace('>', '')):
+    # 基本字段检查 - 放宽Message-ID要求
+    if not email_node.subject or not email_node.sender:
         return False
     
     # 主题合理性检查（不应该只是空白或无意义字符）
     if len(email_node.subject.strip()) < 3:
         return False
+    
+    # Message-ID格式检查 - 如果存在的话
+    if email_node.message_id:
+        clean_id = email_node.message_id.replace('<', '').replace('>', '')
+        # 放宽格式要求，允许更多字符
+        if not re.match(r'^[a-zA-Z0-9\.\-_@]+$', clean_id):
+            return False
     
     return True
 
